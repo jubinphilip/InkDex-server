@@ -5,10 +5,10 @@ from sqlalchemy.orm import Session
 from repositories.user_repository import create_user as create_user_record
 from repositories.user_repository import get_user_by_email
 from security.password import hash_password
-from schemas.user import UserCreate
+from schemas.user_credentials import UserCredentials
 
 
-def create_user(db: Session, user: UserCreate):
+def create_user(db: Session, user: UserCredentials):
     existing_user = get_user_by_email(db, user.email)
 
     if existing_user is not None:
