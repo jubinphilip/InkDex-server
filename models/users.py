@@ -16,7 +16,7 @@ class User(Base):
         default=uuid.uuid4,
     )
 
-    password: Mapped[str] = mapped_column(String(100), nullable=False)
+    password: Mapped[str] = mapped_column(String(255), nullable=False)
 
     email: Mapped[str] = mapped_column(
         String(255),
