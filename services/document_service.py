@@ -6,7 +6,13 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from repositories.document_repository import create_document, create_user_document
+from repositories.document_repository import (
+    create_document,
+    create_user_document,
+    delete_document as delete_document_record,
+    get_document_owned_by_user,
+)
+from schemas.document_delete_response import DocumentDeleteResponse
 from schemas.document_upload_response import DocumentUploadResponse
 from storage import cloudinary_storage
 
@@ -51,6 +57,8 @@ async def process_document(db: Session, file: UploadFile, user_id: uuid.UUID):
         document = create_document(
             db=db,
             filename=file.filename,
+            storage_public_id=uploaded["public_id"],
+            file_url=uploaded["url"],
         )
 
         create_user_document(
@@ -75,4 +83,40 @@ async def process_document(db: Session, file: UploadFile, user_id: uuid.UUID):
         document_id=document.id,
         filename=document.file_name,
         status="uploaded",
+    )
+
+
+async def delete_document(db: Session, document_id: uuid.UUID, user_id: uuid.UUID):
+
+    document = get_document_owned_by_user(
+        db=db,
+        document_id=document_id,
+        user_id=user_id,
+    )
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    storage_public_id = document.storage_public_id
+
+    try:
+        delete_document_record(db, document)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete the document",
+        ) from None
+
+    # Remove the file from Cloudinary only after the DB delete is committed
+    await run_in_threadpool(_delete_stored_file, storage_public_id)
+
+    return DocumentDeleteResponse(
+        message="Document deleted successfully",
+        document_id=document_id,
     )

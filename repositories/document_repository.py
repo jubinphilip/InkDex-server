@@ -9,16 +9,40 @@ from models.user_documents import UserDocuments
 
 def create_document(
     db: Session,
-    filename: str
+    filename: str,
+    storage_public_id: str,
+    file_url: str
 ):
     document = Documents(
-        file_name=filename
+        file_name=filename,
+        storage_public_id=storage_public_id,
+        file_url=file_url
     )
 
     db.add(document)
     db.flush()
 
     return document
+
+
+def get_document_owned_by_user(
+    db: Session,
+    document_id: uuid.UUID,
+    user_id: uuid.UUID
+) -> Documents | None:
+    return (
+        db.query(Documents)
+        .join(UserDocuments, UserDocuments.document_id == Documents.id)
+        .filter(
+            Documents.id == document_id,
+            UserDocuments.user_id == user_id,
+        )
+        .first()
+    )
+
+
+def delete_document(db: Session, document: Documents) -> None:
+    db.delete(document)
 
 
 def create_user_document(
