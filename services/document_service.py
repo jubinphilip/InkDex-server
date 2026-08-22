@@ -15,13 +15,21 @@ from repositories.document_repository import (
 from schemas.document_delete_response import DocumentDeleteResponse
 from schemas.document_upload_response import DocumentUploadResponse
 from storage import cloudinary_storage
+from queues.queue import document_queue
+from rq import Retry
+from utils.logging_config import setup_logger
+
+import os
+from fastapi import UploadFile
+
+UPLOAD_DIR = "uploads"
+
+logger = setup_logger(__name__)
 
 ALLOWED_CONTENT_TYPES = {"application/pdf"}
 
 
 def _delete_stored_file(public_id: str) -> None:
-    # Best-effort cleanup: an orphaned file in Cloudinary is harmless,
-    # so a cleanup failure must not mask the original error.
     try:
         cloudinary_storage.delete_file(public_id)
     except cloudinary.exceptions.Error:
@@ -40,25 +48,19 @@ async def process_document(db: Session, file: UploadFile, user_id: uuid.UUID):
             detail="Only PDF files are supported",
         )
 
-    # Upload to Cloudinary; the SDK is blocking, so run it in a thread
-    try:
-        uploaded = await run_in_threadpool(
-            cloudinary_storage.upload_file,
-            file.file,
-            file.filename,
-        )
-    except cloudinary.exceptions.Error:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="File storage is unavailable, please try again later",
-        ) from None
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    stored_filename = f"{uuid.uuid4()}_{file.filename}"
+    file_path = os.path.join(UPLOAD_DIR, stored_filename)
+
+    # Save uploaded PDF to local disk
+    with open(file_path, "wb") as buffer:
+        while chunk := await file.read(1024 * 1024):
+            buffer.write(chunk)
 
     try:
         document = create_document(
             db=db,
             filename=file.filename,
-            storage_public_id=uploaded["public_id"],
-            file_url=uploaded["url"],
         )
 
         create_user_document(
@@ -69,9 +71,19 @@ async def process_document(db: Session, file: UploadFile, user_id: uuid.UUID):
 
         db.commit()
         db.refresh(document)
-    except SQLAlchemyError:
+
+        # Enqueue background processing job in Redis queue with the local path
+        document_queue.enqueue(
+            "workers.document_worker.process_document",
+            str(document.id),
+            file_path,
+            retry=Retry(max=3)
+        )
+    except SQLAlchemyError as e:
         db.rollback()
-        _delete_stored_file(uploaded["public_id"])
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        logger.error(f"Failed to create document record for upload: {file.filename}", exc_info=True)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -79,10 +91,10 @@ async def process_document(db: Session, file: UploadFile, user_id: uuid.UUID):
         ) from None
 
     return DocumentUploadResponse(
-        message="Document uploaded successfully",
+        message="Document uploaded and processing started",
         document_id=document.id,
         filename=document.file_name,
-        status="uploaded",
+        status="processing",
     )
 
 
