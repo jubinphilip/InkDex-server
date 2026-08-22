@@ -6,7 +6,17 @@ from routers.auth import router as auth_router
 from routers.document import router as document_router
 from routers.users import router as users_router
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], #Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"], # Allow all methods
+    allow_headers=["*"], # Allow all haeders
+)
 
 app.add_middleware(AuthMiddleware)
 
