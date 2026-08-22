@@ -19,6 +19,14 @@ from utils.logging_config import setup_logger
 
 logger = setup_logger(__name__)
 
+# Load the sentence transformer model once at the module level for the worker to avoid repetitive model initialization it is declared globally.
+
+try:
+    model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+except Exception as e:
+    logger.error("Failed to load sentence transformer model", exc_info=True)
+    raise RuntimeError("Embedding model initialization failed") from e
+
 
 def process_document(document_id: str, file_path: str) -> None:
     db: Session = SessionLocal()
@@ -52,12 +60,6 @@ def process_document(document_id: str, file_path: str) -> None:
                 pass
             raise
 
-        # Load the  sentense transformer model
-        try:
-            model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
-        except Exception as e:
-            logger.error("Failed to load sentence transformer model", exc_info=True)
-            raise RuntimeError("Embedding model initialization failed") from e
 
         try:
             reader = PdfReader(file_path)
