@@ -7,6 +7,7 @@ from database.database import get_db
 from middleware.rate_limit import rate_limit
 from schemas.document_delete_response import DocumentDeleteResponse
 from schemas.document_upload_response import DocumentUploadResponse
+from schemas.document_response import DocumentResponse
 from schemas.question import Question
 from security.bearer import bearer_scheme
 from security.current_user import get_current_user_id
@@ -65,3 +66,14 @@ async def get_answer(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     return await document_service.get_answer(db, question, user_id)
+
+
+@router.get(
+    "/get-documents",
+    response_model=list[DocumentResponse],
+)
+async def get_documents(
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return await document_service.get_user_documents(db, user_id)

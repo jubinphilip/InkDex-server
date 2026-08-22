@@ -24,13 +24,14 @@ cloudinary.config(
 
 def upload_file(file_obj, filename: str) -> dict:
 
-    extension = os.path.splitext(filename)[1]
-
+    # Note: Cloudinary treats PDFs as "image" type assets rather than "raw".
+    # Using "image" allows direct viewing/embedding in browser frames on the frontend.
+    # We do not include the extension in public_id for image types, as Cloudinary appends it automatically.
     result = cloudinary.uploader.upload(
         file_obj,
-        resource_type="raw",
+        resource_type="image",
         folder="documents",
-        public_id=f"{uuid.uuid4()}{extension}",
+        public_id=str(uuid.uuid4()),
     )
 
     return {
@@ -39,5 +40,9 @@ def upload_file(file_obj, filename: str) -> dict:
     }
 
 
+
 def delete_file(public_id: str) -> None:
-    cloudinary.uploader.destroy(public_id, resource_type="raw")
+    # Match resource_type="image" used during upload
+    cloudinary.uploader.destroy(public_id, resource_type="image")
+
+

@@ -10,6 +10,7 @@ from repositories.document_repository import (
     create_user_document,
     delete_document as delete_document_record,
     get_document_owned_by_user,
+    get_documents_by_user,
 )
 from schemas.document_delete_response import DocumentDeleteResponse
 from schemas.document_upload_response import DocumentUploadResponse
@@ -196,3 +197,7 @@ Instructions:
             for chunk, distance in results
         ]
     }
+
+
+async def get_user_documents(db: Session, user_id: uuid.UUID):
+    return get_documents_by_user(db, user_id)

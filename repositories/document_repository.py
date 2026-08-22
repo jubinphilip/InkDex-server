@@ -92,3 +92,17 @@ def create_chunk(
     db.add(chunk)
 
     return chunk
+
+
+def get_documents_by_user(
+    db: Session,
+    user_id: uuid.UUID
+) -> list[Documents]:
+    return (
+        db.query(Documents)
+        .join(UserDocuments, UserDocuments.document_id == Documents.id)
+        .filter(
+            UserDocuments.user_id == user_id,
+        )
+        .all()
+    )
