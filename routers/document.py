@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, status
 from sqlalchemy.orm import Session
 
 from database.database import get_db
+from middleware.rate_limit import rate_limit
 from schemas.document_delete_response import DocumentDeleteResponse
 from schemas.document_upload_response import DocumentUploadResponse
 from security.bearer import bearer_scheme
@@ -22,6 +23,7 @@ router = APIRouter(
     "/upload-document",
     response_model=DocumentUploadResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit)],
 )
 async def upload_document(
     db: Session = Depends(get_db),
