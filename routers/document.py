@@ -7,6 +7,7 @@ from database.database import get_db
 from middleware.rate_limit import rate_limit
 from schemas.document_delete_response import DocumentDeleteResponse
 from schemas.document_upload_response import DocumentUploadResponse
+from schemas.question import Question
 from security.bearer import bearer_scheme
 from security.current_user import get_current_user_id
 from services import document_service
@@ -54,3 +55,13 @@ async def delete_document(
         document_id,
         user_id
     )
+
+@router.post(
+    "/question",
+)
+async def get_answer(
+    question: Question,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return await document_service.get_answer(db, question, user_id)

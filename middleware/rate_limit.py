@@ -2,7 +2,7 @@ import time
 
 from fastapi import Request, HTTPException, status
 
-from queues.queues import redis_connection
+from queues.queue import redis_connection
 
 
 MAX_REQUESTS = 10

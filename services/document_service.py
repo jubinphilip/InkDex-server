@@ -5,7 +5,6 @@ from fastapi import HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-
 from repositories.document_repository import (
     create_document,
     create_user_document,
@@ -18,9 +17,15 @@ from storage import cloudinary_storage
 from queues.queue import document_queue
 from rq import Retry
 from utils.logging_config import setup_logger
-
 import os
-from fastapi import UploadFile
+from dotenv import load_dotenv
+
+from config.gemini import gemini_client
+from config.embeddings import embedding_model
+from schemas.question import Question
+from repositories.document_retrieval_repository import get_similar_chunks
+
+load_dotenv()
 
 UPLOAD_DIR = "uploads"
 
@@ -132,3 +137,62 @@ async def delete_document(db: Session, document_id: uuid.UUID, user_id: uuid.UUI
         message="Document deleted successfully",
         document_id=document_id,
     )
+
+
+async def get_answer(db: Session, question: Question, user_id: uuid.UUID):
+    query = question.text
+    document_id = question.document_id
+
+    query_embedding = embedding_model.encode(query).tolist()
+
+    results = get_similar_chunks(
+        db=db,
+        user_id=user_id,
+        document_id=document_id,
+        query_embedding=query_embedding,
+        top_k=5,
+        distance_threshold=0.50
+    )
+
+    # if no similar chunks chunks found
+    if not results:
+        return {
+            "answer": "I could not find relevant information in the selected document."
+        }
+
+    # Build context for LLM
+    context = "\n\n".join(
+        chunk.content
+        for chunk, distance in results
+    )
+    prompt = f"""
+Answer the question using only the provided context.
+
+Context:
+{context}
+
+Question:
+{query}
+
+Instructions:
+- Answer the question directly.
+- Do not start with phrases such as "Based on the provided context", "According to the context", or "From the provided context".
+- Do not mention that you are using context or documents.
+- Return only the answer.
+- If the answer cannot be found in the context, say exactly:
+  "I could not find the answer in the provided document."
+"""
+    response = gemini_client.models.generate_content(
+        model="gemini-3.5-flash",
+        contents=prompt
+    )
+    return {
+        "answer": response.text,
+        "sources": [
+            {
+                "page_number": chunk.page_number,
+                "distance": distance
+            }
+            for chunk, distance in results
+        ]
+    }
