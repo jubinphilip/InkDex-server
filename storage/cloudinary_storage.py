@@ -24,9 +24,9 @@ cloudinary.config(
 
 def upload_file(file_obj, filename: str) -> dict:
 
-    # Note: Cloudinary treats PDFs as "image" type assets rather than "raw".
-    # Using "image" allows direct viewing/embedding in browser frames on the frontend.
-    # We do not include the extension in public_id for image types, as Cloudinary appends it automatically.
+    # Upload PDFs as image assets so they can be viewed directly in the browser.
+    # Cloudinary adds the file extension, so we don't include it in the public_id.
+
     result = cloudinary.uploader.upload(
         file_obj,
         resource_type="image",
