@@ -1,4 +1,3 @@
-import logging
 import os
 import tempfile
 import urllib.request
@@ -9,114 +8,123 @@ from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import SessionLocal
-from storage import cloudinary_storage
-from repositories.document_repository import create_chunk, update_document_storage_info
-
+from repositories.document_repository import create_chunk
 from utils.logging_config import setup_logger
 
 logger = setup_logger(__name__)
 
-# Load the sentence transformer model once at the module level for the worker to avoid repetitive model initialization it is declared globally.
 
+# Loaded once at worker startup; CPU because the Render worker
+# has no access to Apple's MPS device.
 try:
-    model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
-except Exception as e:
-    logger.error("Failed to load sentence transformer model", exc_info=True)
-    raise RuntimeError("Embedding model initialization failed") from e
+    model = SentenceTransformer(
+        "all-MiniLM-L6-v2",
+        device="cpu",
+    )
+except Exception:
+    logger.error(
+        "Failed to load sentence transformer model",
+        exc_info=True,
+    )
+    raise RuntimeError("Embedding model initialization failed")
 
 
-def process_document(document_id: str, file_path: str) -> None:
+def process_document(
+    document_id: str,
+    file_url: str,
+) -> None:
+
     db: Session = SessionLocal()
+    temp_file_path = None
 
     try:
-        # Resolve target document UUID
-        doc_uuid = document_id if isinstance(document_id, uuid.UUID) else uuid.UUID(document_id)
+        doc_uuid = (
+            document_id
+            if isinstance(document_id, uuid.UUID)
+            else uuid.UUID(document_id)
+        )
 
-        # Upload file to Cloudinary from local temp path
+        # Download the PDF from Cloudinary to a temporary local file
         try:
-            with open(file_path, "rb") as f:
-                uploaded = cloudinary_storage.upload_file(f, os.path.basename(file_path))
-        except Exception as e:
-            logger.error(f"Failed to upload document {document_id} to Cloudinary", exc_info=True)
-            raise RuntimeError("Cloudinary upload failed") from e
+            with tempfile.NamedTemporaryFile(
+                suffix=".pdf",
+                delete=False,
+            ) as temp_file:
+                temp_file_path = temp_file.name
 
-        # Update the document storage metadata in the database
-        try:
-            update_document_storage_info(
-                db=db,
-                document_id=doc_uuid,
-                storage_public_id=uploaded["public_id"],
-                file_url=uploaded["url"]
+            urllib.request.urlretrieve(file_url, temp_file_path)
+
+        except (urllib.error.URLError, OSError) as e:
+            logger.error(
+                f"Failed to download document {document_id} from Cloudinary",
+                exc_info=True,
             )
-        except SQLAlchemyError as e:
-            logger.error(f"Failed to update document storage info for {document_id}", exc_info=True)
-            # Try to delete the uploaded Cloudinary file since database sync failed
-            try:
-                cloudinary_storage.delete_file(uploaded["public_id"])
-            except Exception:
-                pass
-            raise
-
+            raise RuntimeError("Failed to download document") from e
 
         try:
-            reader = PdfReader(file_path)
+            reader = PdfReader(temp_file_path)
         except Exception as e:
-            logger.error(f"Failed to parse PDF file from path: {file_path}", exc_info=True)
+            logger.error(
+                f"Failed to parse PDF file: {temp_file_path}",
+                exc_info=True,
+            )
             raise ValueError("Invalid PDF format") from e
 
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=500,
-            chunk_overlap=100
+            chunk_overlap=100,
         )
 
         chunks_with_pages = []
 
-        # Extract and chunk PDF
         for page_number, page in enumerate(reader.pages, start=1):
             text = page.extract_text() or ""
-            chunks = splitter.split_text(text)
-            for chunk in chunks:
+
+            for chunk in splitter.split_text(text):
                 chunks_with_pages.append((chunk, page_number))
 
         if not chunks_with_pages:
             raise ValueError("No text could be extracted from document")
 
-        # Extract only text for embedding
         chunk_texts = [chunk for chunk, _ in chunks_with_pages]
 
-        # Generate embeddings
         embeddings = model.encode(chunk_texts)
 
-        # Save chunks and  embeddings
-        for (chunk, page_number), embedding in zip(chunks_with_pages, embeddings):
+        for (chunk, page_number), embedding in zip(
+            chunks_with_pages,
+            embeddings,
+        ):
             create_chunk(
                 db=db,
                 document_id=doc_uuid,
                 content=chunk,
                 embedding=embedding.tolist(),
-                page_number=page_number
+                page_number=page_number,
             )
 
         db.commit()
 
-    except (SQLAlchemyError, ValueError, RuntimeError) as e:
-        db.rollback()
-        logger.error(f"Processing failed for document {document_id}: {e}", exc_info=True)
-        raise
+        logger.info(f"Document {document_id} processed successfully")
 
-    except Exception as e:
+    except Exception:
         db.rollback()
-        logger.error(f"Unexpected error processing document {document_id}: {e}", exc_info=True)
+
+        logger.error(
+            f"Processing failed for document {document_id}",
+            exc_info=True,
+        )
         raise
 
     finally:
         db.close()
-        # Clean up temporary local file
-        if os.path.exists(file_path):
+
+        if temp_file_path and os.path.exists(temp_file_path):
             try:
-                os.remove(file_path)
-            except Exception:
-                pass
+                os.remove(temp_file_path)
+            except OSError:
+                logger.warning(
+                    f"Failed to remove temporary file {temp_file_path}",
+                    exc_info=True,
+                )

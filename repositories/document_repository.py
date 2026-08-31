@@ -10,8 +10,8 @@ from models.user_documents import UserDocuments
 def create_document(
     db: Session,
     filename: str,
-    storage_public_id: str = "pending",
-    file_url: str = "pending"
+    storage_public_id: str,
+    file_url: str
 ):
     document = Documents(
         file_name=filename,
@@ -22,20 +22,6 @@ def create_document(
     db.add(document)
     db.flush()
 
-    return document
-
-
-def update_document_storage_info(
-    db: Session,
-    document_id: uuid.UUID,
-    storage_public_id: str,
-    file_url: str
-) -> Documents:
-    document = db.query(Documents).filter(Documents.id == document_id).first()
-    if document:
-        document.storage_public_id = storage_public_id
-        document.file_url = file_url
-        db.flush()
     return document
 
 

@@ -3,8 +3,13 @@ import uuid
 import cloudinary.exceptions
 from fastapi import HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
+from rq import Retry
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
+from config.embeddings import embedding_model
+from config.gemini import gemini_client
+from queues.queue import document_queue
 from repositories.document_repository import (
     create_document,
     create_user_document,
@@ -12,23 +17,12 @@ from repositories.document_repository import (
     get_document_owned_by_user,
     get_documents_by_user,
 )
+from repositories.document_retrieval_repository import get_similar_chunks
 from schemas.document_delete_response import DocumentDeleteResponse
 from schemas.document_upload_response import DocumentUploadResponse
-from storage import cloudinary_storage
-from queues.queue import document_queue
-from rq import Retry
-from utils.logging_config import setup_logger
-import os
-from dotenv import load_dotenv
-
-from config.gemini import gemini_client
-from config.embeddings import embedding_model
 from schemas.question import Question
-from repositories.document_retrieval_repository import get_similar_chunks
-
-load_dotenv()
-
-UPLOAD_DIR = "uploads"
+from storage import cloudinary_storage
+from utils.logging_config import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -42,8 +36,11 @@ def _delete_stored_file(public_id: str) -> None:
         pass
 
 
-async def process_document(db: Session, file: UploadFile, user_id: uuid.UUID):
-
+async def process_document(
+    db: Session,
+    file: UploadFile,
+    user_id: uuid.UUID,
+):
     if (
         not file.filename
         or not file.filename.lower().endswith(".pdf")
@@ -54,19 +51,30 @@ async def process_document(db: Session, file: UploadFile, user_id: uuid.UUID):
             detail="Only PDF files are supported",
         )
 
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    stored_filename = f"{uuid.uuid4()}_{file.filename}"
-    file_path = os.path.join(UPLOAD_DIR, stored_filename)
+    # The Cloudinary SDK is blocking, so run it in a thread
+    try:
+        uploaded = await run_in_threadpool(
+            cloudinary_storage.upload_file,
+            file.file,
+            file.filename,
+        )
+    except Exception:
+        logger.error(
+            f"Failed to upload document to Cloudinary: {file.filename}",
+            exc_info=True,
+        )
 
-    # Save uploaded PDF to local disk
-    with open(file_path, "wb") as buffer:
-        while chunk := await file.read(1024 * 1024):
-            buffer.write(chunk)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to store uploaded document",
+        ) from None
 
     try:
         document = create_document(
             db=db,
             filename=file.filename,
+            storage_public_id=uploaded["public_id"],
+            file_url=uploaded["url"],
         )
 
         create_user_document(
@@ -78,22 +86,42 @@ async def process_document(db: Session, file: UploadFile, user_id: uuid.UUID):
         db.commit()
         db.refresh(document)
 
-        # Enqueue background processing job in Redis queue with the local path
-        document_queue.enqueue(
-            "workers.document_worker.process_document",
-            str(document.id),
-            file_path,
-            retry=Retry(max=3)
-        )
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         db.rollback()
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        logger.error(f"Failed to create document record for upload: {file.filename}", exc_info=True)
+        _delete_stored_file(uploaded["public_id"])
+
+        logger.error(
+            f"Failed to create document record for upload: {file.filename}",
+            exc_info=True,
+        )
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to save the uploaded document",
+        ) from None
+
+    try:
+        document_queue.enqueue(
+            "workers.document_worker.process_document",
+            str(document.id),
+            document.file_url,
+            retry=Retry(max=3),
+        )
+
+    except Exception:
+        # The document row is already committed, so undo it explicitly
+        db.delete(document)
+        db.commit()
+        _delete_stored_file(uploaded["public_id"])
+
+        logger.error(
+            f"Failed to enqueue document processing: {file.filename}",
+            exc_info=True,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Document processing is unavailable, please try again later",
         ) from None
 
     return DocumentUploadResponse(
@@ -104,8 +132,11 @@ async def process_document(db: Session, file: UploadFile, user_id: uuid.UUID):
     )
 
 
-async def delete_document(db: Session, document_id: uuid.UUID, user_id: uuid.UUID):
-
+async def delete_document(
+    db: Session,
+    document_id: uuid.UUID,
+    user_id: uuid.UUID,
+):
     document = get_document_owned_by_user(
         db=db,
         document_id=document_id,
@@ -123,12 +154,13 @@ async def delete_document(db: Session, document_id: uuid.UUID, user_id: uuid.UUI
     try:
         delete_document_record(db, document)
         db.commit()
+
     except SQLAlchemyError:
         db.rollback()
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete the document",
+            detail="Failed to delete document",
         ) from None
 
     # Remove the file from Cloudinary only after the DB delete is committed
@@ -155,13 +187,11 @@ async def get_answer(db: Session, question: Question, user_id: uuid.UUID):
         distance_threshold=0.50
     )
 
-    # if no similar chunks chunks found
     if not results:
         return {
             "answer": "I could not find relevant information in the selected document."
         }
 
-    # Build context for LLM
     context = "\n\n".join(
         chunk.content
         for chunk, distance in results
