@@ -184,7 +184,7 @@ async def get_answer(db: Session, question: Question, user_id: uuid.UUID):
         document_id=document_id,
         query_embedding=query_embedding,
         top_k=5,
-        distance_threshold=0.50
+        distance_threshold=0.75
     )
 
     if not results:
