@@ -5,30 +5,15 @@ import urllib.error
 import uuid
 
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy.orm import Session
 
+from config.embeddings import embedding_model
 from database.database import SessionLocal
 from repositories.document_repository import create_chunk
 from utils.logging_config import setup_logger
 
 logger = setup_logger(__name__)
-
-
-# Loaded once at worker startup; CPU because the Render worker
-# has no access to Apple's MPS device.
-try:
-    model = SentenceTransformer(
-        "all-MiniLM-L6-v2",
-        device="cpu",
-    )
-except Exception:
-    logger.error(
-        "Failed to load sentence transformer model",
-        exc_info=True,
-    )
-    raise RuntimeError("Embedding model initialization failed")
 
 
 def process_document(
@@ -90,7 +75,7 @@ def process_document(
 
         chunk_texts = [chunk for chunk, _ in chunks_with_pages]
 
-        embeddings = model.encode(chunk_texts)
+        embeddings = embedding_model.encode(chunk_texts)
 
         for (chunk, page_number), embedding in zip(
             chunks_with_pages,
