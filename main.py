@@ -12,10 +12,13 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], #Allow all origins
+    allow_origins=[
+        "http://localhost:3000",
+        "https://inkdex-frontend.vercel.app",
+    ],
     allow_credentials=True,
-    allow_methods=["*"], # Allow all methods
-    allow_headers=["*"], # Allow all haeders
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.add_middleware(AuthMiddleware)
