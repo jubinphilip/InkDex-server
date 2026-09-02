@@ -12,6 +12,7 @@ from config.embeddings import embedding_model
 from database.database import SessionLocal
 from repositories.document_repository import create_chunk
 from utils.logging_config import setup_logger
+from utils.ocr import ocr_page
 
 logger = setup_logger(__name__)
 
@@ -66,6 +67,9 @@ def process_document(
 
         for page_number, page in enumerate(reader.pages, start=1):
             text = page.extract_text() or ""
+
+            if not text.strip():
+                text = ocr_page(temp_file_path, page_number)
 
             for chunk in splitter.split_text(text):
                 chunks_with_pages.append((chunk, page_number))
