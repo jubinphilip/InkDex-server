@@ -11,18 +11,31 @@ def create_document(
     db: Session,
     filename: str,
     storage_public_id: str,
-    file_url: str
+    file_url: str,
+    status: str = "processing",
 ):
     document = Documents(
         file_name=filename,
         storage_public_id=storage_public_id,
-        file_url=file_url
+        file_url=file_url,
+        status=status,
     )
 
     db.add(document)
     db.flush()
 
     return document
+
+
+def update_document_status(
+    db: Session,
+    document_id: uuid.UUID,
+    status: str,
+) -> None:
+    doc = db.query(Documents).filter(Documents.id == document_id).first()
+    if doc:
+        doc.status = status
+        db.flush()
 
 
 def get_document_owned_by_user(

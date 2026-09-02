@@ -7,6 +7,7 @@ class DocumentResponse(BaseModel):
     id: UUID
     file_name: str
     file_url: str
+    status: str
     created_at: datetime
     updated_at: datetime
 

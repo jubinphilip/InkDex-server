@@ -233,3 +233,21 @@ Instructions:
 
 async def get_user_documents(db: Session, user_id: uuid.UUID):
     return get_documents_by_user(db, user_id)
+
+
+async def get_document_status(
+    db: Session,
+    document_id: uuid.UUID,
+    user_id: uuid.UUID,
+):
+    document = get_document_owned_by_user(
+        db=db,
+        document_id=document_id,
+        user_id=user_id,
+    )
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+    return document

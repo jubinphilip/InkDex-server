@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from config.embeddings import embedding_model
 from database.database import SessionLocal
-from repositories.document_repository import create_chunk
+from repositories.document_repository import create_chunk, update_document_status
 from utils.logging_config import setup_logger
 from utils.ocr import ocr_page
 
@@ -93,12 +93,18 @@ def process_document(
                 page_number=page_number,
             )
 
+        update_document_status(db, doc_uuid, "completed")
         db.commit()
 
         logger.info(f"Document {document_id} processed successfully")
 
     except Exception:
         db.rollback()
+        try:
+            update_document_status(db, doc_uuid, "failed")
+            db.commit()
+        except Exception:
+            db.rollback()
 
         logger.error(
             f"Processing failed for document {document_id}",

@@ -77,3 +77,20 @@ async def get_documents(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     return await document_service.get_user_documents(db, user_id)
+
+
+@router.get(
+    "/{document_id}",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_document(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return await document_service.get_document_status(
+        db,
+        document_id,
+        user_id,
+    )
