@@ -27,6 +27,8 @@ from utils.logging_config import setup_logger
 logger = setup_logger(__name__)
 
 ALLOWED_CONTENT_TYPES = {"application/pdf"}
+RETRIEVAL_TOP_K = 5
+RETRIEVAL_DISTANCE_THRESHOLD = 0.75
 
 
 def _delete_stored_file(public_id: str) -> None:
@@ -183,8 +185,8 @@ async def get_answer(db: Session, question: Question, user_id: uuid.UUID):
         user_id=user_id,
         document_id=document_id,
         query_embedding=query_embedding,
-        top_k=5,
-        distance_threshold=0.75
+        top_k=RETRIEVAL_TOP_K,
+        distance_threshold=RETRIEVAL_DISTANCE_THRESHOLD,
     )
 
     if not results:

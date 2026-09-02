@@ -8,9 +8,9 @@ def get_similar_chunks(
     db: Session,
     query_embedding: list[float],
     user_id: uuid.UUID,
-    document_id: uuid.UUID | None = None,
-    top_k: int = 5,
-    distance_threshold: float = 0.75
+    document_id: uuid.UUID | None,
+    top_k: int,
+    distance_threshold: float,
 ):
     # Calculate cosine distance using pgvector
     distance_expr = DocumentChunks.embedding.cosine_distance(query_embedding).label("distance")
