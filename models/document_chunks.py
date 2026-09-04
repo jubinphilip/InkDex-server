@@ -24,6 +24,7 @@ class DocumentChunks(Base):
     content: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(Vector(384))
     page_number: Mapped[int | None] = mapped_column(nullable=True)
+    section_name: Mapped[str | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

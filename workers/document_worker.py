@@ -3,16 +3,15 @@ import tempfile
 import urllib.request
 import urllib.error
 import uuid
-
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy.orm import Session
-
 from config.embeddings import embedding_model
 from database.database import SessionLocal
 from repositories.document_repository import create_chunk, update_document_status
 from utils.logging_config import setup_logger
 from utils.ocr import ocr_page
+from utils.section_detector import split_into_sections
 
 logger = setup_logger(__name__)
 
@@ -64,24 +63,33 @@ def process_document(
         )
 
         chunks_with_pages = []
+        current_section = None
 
         for page_number, page in enumerate(reader.pages, start=1):
             text = page.extract_text() or ""
-
             if not text.strip():
                 text = ocr_page(temp_file_path, page_number)
 
-            for chunk in splitter.split_text(text):
-                chunks_with_pages.append((chunk, page_number))
+            sections, current_section = split_into_sections(
+                text,
+                current_section,
+            )
+
+            for section_text, section_name in sections:
+                for chunk in splitter.split_text(section_text):
+                    chunks_with_pages.append(
+                        (chunk, page_number, section_name)
+                    )
 
         if not chunks_with_pages:
             raise ValueError("No text could be extracted from document")
 
-        chunk_texts = [chunk for chunk, _ in chunks_with_pages]
+        chunk_texts = [chunk for chunk, _, _ in chunks_with_pages]
 
         embeddings = embedding_model.encode(chunk_texts)
 
-        for (chunk, page_number), embedding in zip(
+        for (
+            chunk,page_number,section_name,), embedding in zip(
             chunks_with_pages,
             embeddings,
         ):
@@ -91,6 +99,7 @@ def process_document(
                 content=chunk,
                 embedding=embedding.tolist(),
                 page_number=page_number,
+                section_name=section_name,
             )
 
         update_document_status(db, doc_uuid, "completed")

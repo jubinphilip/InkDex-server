@@ -79,13 +79,15 @@ def create_chunk(
     document_id: uuid.UUID,
     content: str,
     embedding: list[float],
-    page_number: int 
+    page_number: int ,
+    section_name: str | None = None
 ):
     chunk = DocumentChunks(
         document_id=document_id,
         content=content,
         embedding=embedding,
-        page_number=page_number
+        page_number=page_number,
+        section_name=section_name
     )
 
     db.add(chunk)
