@@ -12,6 +12,7 @@ import models.document_chunks
 import models.documents
 import models.user_documents
 import models.users
+from models.document_sections import DocumentSections
 
 load_dotenv()
 
