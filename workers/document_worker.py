@@ -8,7 +8,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy.orm import Session
 from config.embeddings import embedding_model
 from database.database import SessionLocal
-from repositories.document_repository import create_chunk, update_document_status
+from repositories.document_repository import create_chunk, update_document_status, create_section
 from utils.logging_config import setup_logger
 from utils.ocr import ocr_page
 from utils.section_detector import split_into_sections
@@ -76,9 +76,17 @@ def process_document(
             )
 
             for section_text, section_name in sections:
+
+                section = create_section(
+                    db=db,
+                    document_id=doc_uuid,
+                    section_name=section_name,
+                    content=section_text,
+                )
+
                 for chunk in splitter.split_text(section_text):
                     chunks_with_pages.append(
-                        (chunk, page_number, section_name)
+                        (chunk, page_number, section.id)
                     )
 
         if not chunks_with_pages:
@@ -89,7 +97,10 @@ def process_document(
         embeddings = embedding_model.encode(chunk_texts)
 
         for (
-            chunk,page_number,section_name,), embedding in zip(
+            chunk,
+            page_number,
+            section_id,
+        ), embedding in zip(
             chunks_with_pages,
             embeddings,
         ):
@@ -99,7 +110,7 @@ def process_document(
                 content=chunk,
                 embedding=embedding.tolist(),
                 page_number=page_number,
-                section_name=section_name,
+                section_id=section_id,
             )
 
         update_document_status(db, doc_uuid, "completed")

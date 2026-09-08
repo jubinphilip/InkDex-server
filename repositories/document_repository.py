@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from models.documents import Documents
 from models.document_chunks import DocumentChunks
 from models.user_documents import UserDocuments
+from models.document_sections import DocumentSections
 
 
 def create_document(
@@ -80,14 +81,14 @@ def create_chunk(
     content: str,
     embedding: list[float],
     page_number: int ,
-    section_name: str | None = None
+    section_id: uuid.UUID | None = None
 ):
     chunk = DocumentChunks(
         document_id=document_id,
         content=content,
         embedding=embedding,
         page_number=page_number,
-        section_name=section_name
+        section_id=section_id
     )
 
     db.add(chunk)
@@ -107,3 +108,20 @@ def get_documents_by_user(
         )
         .all()
     )
+
+def create_section(
+    db: Session,
+    document_id: uuid.UUID,
+    section_name: str | None,
+    content: str,
+):
+    section = DocumentSections(
+        document_id=document_id,
+        section_name=section_name,
+        content=content,
+    )
+
+    db.add(section)
+    db.flush()
+
+    return section

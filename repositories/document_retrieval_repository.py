@@ -2,6 +2,7 @@ import uuid
 from sqlalchemy.orm import Session
 from models.document_chunks import DocumentChunks
 from models.user_documents import UserDocuments
+from models.document_sections import DocumentSections
 
 
 def get_similar_chunks(
@@ -17,8 +18,19 @@ def get_similar_chunks(
 
     #Take answer from documents only uploaded by specific user
     query = (
-        db.query(DocumentChunks, distance_expr)
-        .join(UserDocuments, UserDocuments.document_id == DocumentChunks.document_id)
+        db.query(
+            DocumentChunks,
+            DocumentSections,
+            distance_expr,
+        )
+        .join(
+            DocumentSections,
+            DocumentSections.id == DocumentChunks.section_id,
+        )
+        .join(
+            UserDocuments,
+            UserDocuments.document_id == DocumentChunks.document_id,
+        )
         .filter(UserDocuments.user_id == user_id)
     )
 
@@ -32,3 +44,18 @@ def get_similar_chunks(
 
     return query.limit(top_k).all()
 
+
+def get_section_chunks(
+    db: Session,
+    section_id: uuid.UUID,
+    document_id: uuid.UUID,
+):
+    return (
+        db.query(DocumentChunks)
+        .filter(
+            DocumentChunks.section_id == section_id,
+            DocumentChunks.document_id == document_id,
+        )
+        .order_by(DocumentChunks.page_number.asc())
+        .all()
+    )

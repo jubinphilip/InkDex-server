@@ -17,7 +17,7 @@ from repositories.document_repository import (
     get_document_owned_by_user,
     get_documents_by_user,
 )
-from repositories.document_retrieval_repository import get_similar_chunks
+from repositories.document_retrieval_repository import (get_similar_chunks,get_section_chunks)
 from schemas.document_delete_response import DocumentDeleteResponse
 from schemas.document_upload_response import DocumentUploadResponse
 from schemas.question import Question
@@ -194,10 +194,28 @@ async def get_answer(db: Session, question: Question, user_id: uuid.UUID):
             "answer": "I could not find relevant information in the selected document."
         }
 
+    expanded_chunks = []
+
+    seen_chunk_ids = set()
+
+    for chunk, section, distance in results:
+
+        section_chunks = get_section_chunks(
+            db=db,
+            section_id=section.id,
+            document_id=document_id,
+        )
+
+        for section_chunk in section_chunks:
+            if section_chunk.id not in seen_chunk_ids:
+                expanded_chunks.append(section_chunk)
+                seen_chunk_ids.add(section_chunk.id)
+
     context = "\n\n".join(
         chunk.content
-        for chunk, distance in results
+        for chunk in expanded_chunks
     )
+
     prompt = f"""
 Answer the question using only the provided context.
 
@@ -215,39 +233,20 @@ Instructions:
 - If the answer cannot be found in the context, say exactly:
   "I could not find the answer in the provided document."
 """
+
     response = gemini_client.models.generate_content(
         model="gemini-3.5-flash",
         contents=prompt
     )
+
     return {
         "answer": response.text,
         "sources": [
             {
                 "page_number": chunk.page_number,
+                "section_name": section.section_name,
                 "distance": distance
             }
-            for chunk, distance in results
+            for chunk, section, distance in results
         ]
     }
-
-
-async def get_user_documents(db: Session, user_id: uuid.UUID):
-    return get_documents_by_user(db, user_id)
-
-
-async def get_document_status(
-    db: Session,
-    document_id: uuid.UUID,
-    user_id: uuid.UUID,
-):
-    document = get_document_owned_by_user(
-        db=db,
-        document_id=document_id,
-        user_id=user_id,
-    )
-    if document is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found",
-        )
-    return document
