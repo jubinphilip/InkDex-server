@@ -16,6 +16,7 @@ from repositories.document_repository import (
     delete_document as delete_document_record,
     get_document_owned_by_user,
     get_documents_by_user,
+    get_section_similar_chunks,
 )
 from repositories.document_retrieval_repository import (get_similar_chunks,get_section_chunks)
 from schemas.document_delete_response import DocumentDeleteResponse
@@ -178,8 +179,10 @@ async def get_answer(db: Session, question: Question, user_id: uuid.UUID):
     query = question.text
     document_id = question.document_id
 
+    # Create embedding for the user's question
     query_embedding = embedding_model.encode(query).tolist()
 
+    # First: search the entire document to find relevant sections
     results = get_similar_chunks(
         db=db,
         user_id=user_id,
@@ -194,45 +197,49 @@ async def get_answer(db: Session, question: Question, user_id: uuid.UUID):
             "answer": "I could not find relevant information in the selected document."
         }
 
+    # Second: search only inside the sections identified above
     expanded_chunks = []
-
     seen_chunk_ids = set()
 
     for chunk, section, distance in results:
-
-        section_chunks = get_section_chunks(
+        section_results = get_section_similar_chunks(
             db=db,
             section_id=section.id,
             document_id=document_id,
+            query_embedding=query_embedding,
+            top_k=5,
+            distance_threshold=RETRIEVAL_DISTANCE_THRESHOLD,
         )
 
-        for section_chunk in section_chunks:
+        for section_chunk, section_distance in section_results:
             if section_chunk.id not in seen_chunk_ids:
                 expanded_chunks.append(section_chunk)
                 seen_chunk_ids.add(section_chunk.id)
 
+    # Build context for Gemini
     context = "\n\n".join(
         chunk.content
         for chunk in expanded_chunks
     )
 
     prompt = f"""
-Answer the question using only the provided context.
+    Answer the question using only the provided context.
 
-Context:
-{context}
+    Context:
+    {context}
 
-Question:
-{query}
+    Question:
+    {query}
 
-Instructions:
-- Answer the question directly.
-- Do not start with phrases such as "Based on the provided context", "According to the context", or "From the provided context".
-- Do not mention that you are using context or documents.
-- Return only the answer.
-- If the answer cannot be found in the context, say exactly:
-  "I could not find the answer in the provided document."
-"""
+    Instructions:
+    - Answer the question directly.
+    - Do not start with phrases such as "Based on the provided context",
+      "According to the context", or "From the provided context".
+    - Do not mention that you are using context or documents.
+    - Return only the answer.
+    - If the answer cannot be found in the context, say exactly:
+      "I could not find the answer in the provided document."
+    """
 
     response = gemini_client.models.generate_content(
         model="gemini-3.5-flash",
@@ -245,8 +252,33 @@ Instructions:
             {
                 "page_number": chunk.page_number,
                 "section_name": section.section_name,
-                "distance": distance
+                "distance": distance,
             }
             for chunk, section, distance in results
-        ]
+        ],
     }
+
+async def get_user_documents(db: Session, user_id: uuid.UUID):
+    """Return the documents accessible to the authenticated user."""
+    return get_documents_by_user(db, user_id)
+
+
+async def get_document_status(
+    db: Session,
+    document_id: uuid.UUID,
+    user_id: uuid.UUID,
+):
+    """Return one document only when it belongs to the authenticated user."""
+    document = get_document_owned_by_user(
+        db=db,
+        document_id=document_id,
+        user_id=user_id,
+    )
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    return document

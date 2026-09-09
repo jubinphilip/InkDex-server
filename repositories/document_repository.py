@@ -125,3 +125,30 @@ def create_section(
     db.flush()
 
     return section
+
+def get_section_similar_chunks(
+    db: Session,
+    section_id: uuid.UUID,
+    document_id: uuid.UUID,
+    query_embedding: list[float],
+    top_k: int,
+    distance_threshold: float,
+):
+    distance_expr = DocumentChunks.embedding.cosine_distance(
+        query_embedding
+    ).label("distance")
+
+    return (
+        db.query(
+            DocumentChunks,
+            distance_expr,
+        )
+        .filter(
+            DocumentChunks.section_id == section_id,
+            DocumentChunks.document_id == document_id,
+            distance_expr <= distance_threshold,
+        )
+        .order_by(distance_expr.asc())
+        .limit(top_k)
+        .all()
+    )
